@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 // execCommand is a variable to allow testing with mocked commands
 var execCommand = exec.Command
+var claudeUsageCommandOutput = commandOutput
 
 type claudeOAuthToken struct {
 	AccessToken           string   `json:"accessToken"`
@@ -58,7 +60,7 @@ func FetchClaudeUsage() UsageResult {
 		if json.Unmarshal(out, &keychainCreds) == nil {
 			oauth := keychainCreds.ClaudeAiOauth
 			keychainSubscription = oauth.SubscriptionType
-			
+
 			if oauth.AccessToken != "" {
 				// Check if token is expired
 				if oauth.ExpiresAt > 0 && time.Now().UnixMilli() > oauth.ExpiresAt {
@@ -126,6 +128,9 @@ func FetchClaudeUsage() UsageResult {
 			result.Used = "0"
 			result.Message = "No Claude OAuth token found (check ~/.claude/.credentials.json or CLAUDE_API_TOKEN)"
 		}
+		if cliResult, ok := fetchClaudeCLIUsage(result, "oauth token unavailable"); ok {
+			return cliResult
+		}
 		return result
 	}
 
@@ -159,6 +164,9 @@ func FetchClaudeUsage() UsageResult {
 			return result
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
+			if cliResult, ok := fetchClaudeCLIUsage(result, "OAuth API unauthorized"); ok {
+				return cliResult
+			}
 			result.Status = "error"
 			result.Message = "Claude OAuth token unauthorized. Run 'claude auth login'"
 			result.SourceDetail = fmt.Sprintf("http_status=%d", resp.StatusCode)
@@ -210,6 +218,9 @@ func FetchClaudeUsage() UsageResult {
 		result.Used = fmt.Sprintf("%.1f", data.SevenDay.Utilization)
 		result.Message = "Usage fetched from Anthropic OAuth API (7d bucket)"
 	} else {
+		if cliResult, ok := fetchClaudeCLIUsage(result, "API reported no utilization"); ok {
+			return cliResult
+		}
 		result.Used = "0"
 		result.Message = "No utilization reported by API"
 	}
@@ -217,6 +228,154 @@ func FetchClaudeUsage() UsageResult {
 	result.Status = "ok"
 	result.Source = "oauth"
 	return result
+}
+
+type claudeCLIUsageWindow struct {
+	Bucket  string
+	Used    float64
+	ResetAt string
+}
+
+func fetchClaudeCLIUsage(base UsageResult, reason string) (UsageResult, bool) {
+	out, err := claudeUsageCommandOutput(20*time.Second, "claude", "--print", "/usage", "--output-format", "json")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return base, false
+	}
+	windows := parseClaudeCLIUsage(out)
+	if len(windows) == 0 {
+		return base, false
+	}
+
+	result := base
+	result.Status = "ok"
+	result.Source = "claude-cli"
+	result.Unit = "percent"
+	result.Limit = "100"
+	result.Buckets = map[string]string{}
+	result.BucketResets = map[string]string{}
+	maxUsed := 0.0
+	for _, window := range windows {
+		result.Buckets[window.Bucket] = fmt.Sprintf("%.1f", window.Used)
+		if window.ResetAt != "" {
+			result.BucketResets[window.Bucket] = window.ResetAt
+		}
+		if window.Used > maxUsed {
+			maxUsed = window.Used
+		}
+	}
+	if len(result.BucketResets) == 0 {
+		result.BucketResets = nil
+	}
+	result.Used = fmt.Sprintf("%.1f", maxUsed)
+	result.Message = "Usage parsed from claude --print /usage"
+	if strings.TrimSpace(reason) != "" {
+		result.Message += " (" + reason + ")"
+	}
+	return result, true
+}
+
+func parseClaudeCLIUsage(output string) []claudeCLIUsageWindow {
+	text := claudeCLIUsageText(output)
+	windows := []claudeCLIUsageWindow{}
+	for _, line := range strings.Split(text, "\n") {
+		if window, ok := parseClaudeCLIUsageLine(line); ok {
+			windows = append(windows, window)
+		}
+	}
+	return windows
+}
+
+func claudeCLIUsageText(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var payload struct {
+			Result string `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &payload); err == nil && strings.TrimSpace(payload.Result) != "" {
+			return payload.Result
+		}
+	}
+	return output
+}
+
+func parseClaudeCLIUsageLine(line string) (claudeCLIUsageWindow, bool) {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	bucket := ""
+	switch {
+	case strings.HasPrefix(lower, "current session:"):
+		bucket = "5h"
+	case strings.HasPrefix(lower, "current week"):
+		bucket = "7d"
+	default:
+		return claudeCLIUsageWindow{}, false
+	}
+
+	usedMarker := "% used"
+	usedIdx := strings.Index(lower, usedMarker)
+	if usedIdx < 0 {
+		return claudeCLIUsageWindow{}, false
+	}
+	start := usedIdx - 1
+	for start >= 0 {
+		ch := trimmed[start]
+		if (ch < '0' || ch > '9') && ch != '.' {
+			break
+		}
+		start--
+	}
+	usedRaw := strings.TrimSpace(trimmed[start+1 : usedIdx])
+	used, err := strconv.ParseFloat(usedRaw, 64)
+	if err != nil || used < 0 || used > 100 {
+		return claudeCLIUsageWindow{}, false
+	}
+
+	resetAt := ""
+	if resetIdx := strings.Index(lower[usedIdx+len(usedMarker):], "resets "); resetIdx >= 0 {
+		resetRaw := strings.TrimSpace(trimmed[usedIdx+len(usedMarker)+resetIdx+len("resets "):])
+		if parsed := parseClaudeCLIResetTime(resetRaw); !parsed.IsZero() {
+			resetAt = parsed.Format(time.RFC3339)
+		}
+	}
+
+	return claudeCLIUsageWindow{
+		Bucket:  bucket,
+		Used:    used,
+		ResetAt: resetAt,
+	}, true
+}
+
+func parseClaudeCLIResetTime(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+
+	loc := time.Local
+	if open := strings.LastIndex(raw, "("); open >= 0 && strings.HasSuffix(raw, ")") {
+		name := strings.TrimSpace(strings.TrimSuffix(raw[open+1:], ")"))
+		if loaded, err := time.LoadLocation(name); err == nil {
+			loc = loaded
+		}
+		raw = strings.TrimSpace(raw[:open])
+	}
+
+	now := time.Now().In(loc)
+	withYear := fmt.Sprintf("%d %s", now.Year(), raw)
+	for _, layout := range []string{"2006 Jan 2 at 3:04pm", "2006 Jan 2 at 3pm"} {
+		parsed, err := time.ParseInLocation(layout, withYear, loc)
+		if err != nil {
+			continue
+		}
+		if parsed.Before(now.AddDate(0, -6, 0)) {
+			parsed = parsed.AddDate(1, 0, 0)
+		}
+		return parsed
+	}
+	return time.Time{}
 }
 
 type claudeCachedUsageFile struct {

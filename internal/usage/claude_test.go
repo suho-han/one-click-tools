@@ -2,6 +2,7 @@ package usage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,30 @@ func TestSecurityHelper(t *testing.T) {
 		fmt.Print(mockOutput)
 		os.Exit(0)
 	}
+}
+
+func mockClaudeUsageCommand(t *testing.T, output string, err error) func() {
+	t.Helper()
+	orig := claudeUsageCommandOutput
+	claudeUsageCommandOutput = func(timeout time.Duration, name string, args ...string) (string, error) {
+		if timeout != 20*time.Second {
+			t.Fatalf("timeout = %v, want 20s", timeout)
+		}
+		if name != "claude" {
+			t.Fatalf("command = %q, want claude", name)
+		}
+		want := []string{"--print", "/usage", "--output-format", "json"}
+		if len(args) != len(want) {
+			t.Fatalf("args = %v, want %v", args, want)
+		}
+		for i := range want {
+			if args[i] != want[i] {
+				t.Fatalf("args = %v, want %v", args, want)
+			}
+		}
+		return output, err
+	}
+	return func() { claudeUsageCommandOutput = orig }
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -91,6 +116,48 @@ func TestFetchClaudeUsageBuckets(t *testing.T) {
 	}
 	if got := result.Buckets["7d"]; got != "77.7" {
 		t.Fatalf("expected 7d bucket 77.7, got %s", got)
+	}
+}
+
+func TestFetchClaudeUsageFallsBackToCLIWhenAPINoUtilization(t *testing.T) {
+	oldClient := netclient.DefaultClient.HTTPClient
+	oldRetries := netclient.DefaultClient.MaxRetries
+	defer func() {
+		netclient.DefaultClient.HTTPClient = oldClient
+		netclient.DefaultClient.MaxRetries = oldRetries
+	}()
+
+	t.Setenv("CLAUDE_API_TOKEN", "dummy-token")
+	cliOutput := `{"result":"You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 12% used · resets Sep 4 at 7:40am (Asia/Seoul)\nCurrent week (all models): 34.5% used · resets Sep 5 at 8am (Asia/Seoul)"}`
+	restoreCLI := mockClaudeUsageCommand(t, cliOutput, nil)
+	defer restoreCLI()
+
+	netclient.DefaultClient.HTTPClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"five_hour":{"utilization":0},"seven_day":{"utilization":0}}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	netclient.DefaultClient.MaxRetries = 0
+
+	result := FetchClaudeUsage()
+	if result.Status != "ok" {
+		t.Fatalf("expected status ok, got %s", result.Status)
+	}
+	if result.Source != "claude-cli" {
+		t.Fatalf("expected claude-cli source, got %s", result.Source)
+	}
+	if result.Used != "34.5" {
+		t.Fatalf("expected used=34.5 from max CLI bucket, got %s", result.Used)
+	}
+	if got := result.Buckets["5h"]; got != "12.0" {
+		t.Fatalf("expected 5h bucket 12.0, got %s", got)
+	}
+	if got := result.Buckets["7d"]; got != "34.5" {
+		t.Fatalf("expected 7d bucket 34.5, got %s", got)
 	}
 }
 
@@ -167,6 +234,8 @@ func TestFetchClaudeUsage_ExpiredTokenWithRefreshAvailable(t *testing.T) {
 	// Mock the security command
 	restore := mockSecurityCommand(t, string(credsJSON))
 	defer restore()
+	restoreCLI := mockClaudeUsageCommand(t, "", errors.New("claude unavailable"))
+	defer restoreCLI()
 
 	result := FetchClaudeUsage()
 
@@ -208,6 +277,8 @@ func TestFetchClaudeUsage_ExpiredTokenWithoutRefresh(t *testing.T) {
 
 	restore := mockSecurityCommand(t, string(credsJSON))
 	defer restore()
+	restoreCLI := mockClaudeUsageCommand(t, "", errors.New("claude unavailable"))
+	defer restoreCLI()
 
 	result := FetchClaudeUsage()
 
@@ -237,6 +308,8 @@ func TestFetchClaudeUsage_EmptyAccessToken(t *testing.T) {
 
 	restore := mockSecurityCommand(t, string(credsJSON))
 	defer restore()
+	restoreCLI := mockClaudeUsageCommand(t, "", errors.New("claude unavailable"))
+	defer restoreCLI()
 
 	result := FetchClaudeUsage()
 

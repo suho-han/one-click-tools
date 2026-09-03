@@ -112,8 +112,8 @@ var usageCmd = &cobra.Command{
 	Long: `Show tool usage report for configured AI developer tools.
 
 To properly fetch usage, ensure you are authenticated:
-  - Antigravity: Local session artifacts are scanned first (binary: 'agy')
-  - Claude:  Run 'claude auth login' to log in via browser
+  - Antigravity: Run 'agy' once; usage is parsed from 'agy --print /usage'
+  - Claude:  Run 'claude auth login'; fallback usage is parsed from 'claude --print /usage'
   - Command Code: Run 'commandcode login' or set COMMAND_CODE_API_KEY
   - Cursor CLI: Official CLI install is recommended; usage remains best-effort with local fallback
   - Copilot: Configure your token via 'oct config'

@@ -323,7 +323,7 @@ func setupTokens(tools []string) {
 		switch update.NormalizeToolName(tool) {
 		case "claude":
 			needsClaudeAuth = true
-			fmt.Println("✓ Claude Code: Local authentication (OAuth)")
+			fmt.Println("✓ Claude Code: OAuth API with 'claude --print /usage' fallback")
 		case "commandcode":
 			fmt.Println("✓ Command Code: Remote billing API (run 'commandcode login' or set COMMAND_CODE_API_KEY)")
 		case "agy":
@@ -375,10 +375,10 @@ func setupTokens(tools []string) {
 	if needsClaudeAuth || needsGeminiAuth {
 		fmt.Println("\n--- Authentication Reminders ---")
 		if needsClaudeAuth {
-			fmt.Println("Claude Code: Run 'claude auth login' to authenticate.")
+			fmt.Println("Claude Code: Run 'claude auth login' to authenticate the Claude CLI.")
 		}
 		if needsGeminiAuth {
-			fmt.Println("Antigravity CLI: Local session artifacts are used first; no token setup is required for basic usage reporting.")
+			fmt.Println("Antigravity CLI: Run 'agy' once to authenticate the CLI; oct parses 'agy --print /usage'.")
 		}
 	}
 }
