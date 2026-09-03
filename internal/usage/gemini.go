@@ -1,20 +1,11 @@
 package usage
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/suho-han/one-click-ai-tools/internal/netclient"
 )
 
 func baseAntigravityUsageResult() UsageResult {
@@ -26,16 +17,18 @@ func baseAntigravityUsageResult() UsageResult {
 		Used:       "n/a",
 		Limit:      "100",
 		Unit:       "percent",
-		Source:     "quota",
+		Source:     "agy-cli",
 		Status:     "warn",
-		Message:    "No data: Antigravity quota unavailable (refresh Gemini/Antigravity login)",
+		Message:    "No data: Antigravity usage unavailable (run agy and check /usage)",
 	}
 }
 
+var antigravityUsageCommandOutput = commandOutput
+
 func FetchAntigravityUsage() UsageResult {
 	result := withPlanDetection(baseAntigravityUsageResult(), detectAntigravityPlan)
-	if quotaResult, ok := fetchAntigravityQuotaUsage(result); ok {
-		return quotaResult
+	if cliResult, ok := fetchAntigravityCLIUsage(result); ok {
+		return cliResult
 	}
 	return result
 }
@@ -44,237 +37,131 @@ func FetchGeminiUsage() UsageResult {
 	return FetchAntigravityUsage()
 }
 
-type antigravityOAuthCredentials struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiryDate   int64  `json:"expiry_date"`
-	AuthSource   string `json:"-"`
+type antigravityCLIUsageRow struct {
+	Label     string
+	Window    string
+	Remaining float64
+	ResetTime string
 }
 
-var (
-	antigravityKeychainAvailable = func() bool { return runtime.GOOS == "darwin" }
-	antigravitySecurityOutput    = func(args ...string) ([]byte, error) {
-		return exec.Command("security", args...).Output()
-	}
-)
-
-type antigravityQuotaBucket struct {
-	RemainingFraction float64 `json:"remainingFraction"`
-	ResetTime         string  `json:"resetTime"`
-	ModelID           string  `json:"modelId"`
-}
-
-type antigravityQuotaResponse struct {
-	Buckets []antigravityQuotaBucket `json:"buckets"`
-}
-
-func fetchAntigravityQuotaUsage(base UsageResult) (UsageResult, bool) {
-	creds, ok := readAntigravityOAuthCredentials()
-	if !ok || strings.TrimSpace(creds.AccessToken) == "" {
+func fetchAntigravityCLIUsage(base UsageResult) (UsageResult, bool) {
+	out, err := antigravityUsageCommandOutput(20*time.Second, "agy", "--print", "/usage")
+	if err != nil || strings.TrimSpace(out) == "" {
 		return base, false
 	}
 
-	projectID, err := loadAntigravityProjectID(creds.AccessToken)
-	if err != nil || strings.TrimSpace(projectID) == "" {
-		return base, false
-	}
-
-	buckets, err := retrieveAntigravityQuota(creds.AccessToken, projectID)
-	if err != nil || len(buckets) == 0 {
+	rows := parseAntigravityCLIUsage(out)
+	if len(rows) == 0 {
 		return base, false
 	}
 
 	result := base
-	result.Period = "current"
-	result.Source = "quota"
 	result.Status = "ok"
+	result.Source = "agy-cli"
 	result.Unit = "percent"
 	result.Limit = "100"
 	result.Buckets = map[string]string{}
+	result.BucketResets = map[string]string{}
+	result.Message = "Usage parsed from agy --print /usage"
 
 	maxUsed := 0.0
-	modelParts := make([]string, 0, len(buckets))
-	for _, bucket := range dedupeAntigravityQuotaBuckets(buckets) {
-		used := antigravityUsedPercent(bucket.RemainingFraction)
+	debugParts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		used := percentUsedFromRemaining(row.Remaining)
 		if used > maxUsed {
 			maxUsed = used
 		}
-		name := antigravityBucketName(bucket.ModelID)
-		result.Buckets["model:"+name] = fmt.Sprintf("%.1f", used)
-		modelParts = append(modelParts, fmt.Sprintf("%s=%.1f", name, used))
-	}
-
-	result.Used = fmt.Sprintf("%.1f", maxUsed)
-	result.Message = "Usage fetched from Google Code Assist quota API"
-	if os.Getenv("OCT_USAGE_DEBUG") == "1" {
-		details := modelParts
-		if creds.AuthSource != "" {
-			details = append([]string{"auth_source=" + creds.AuthSource}, details...)
+		label := antigravityCLIUsageBucketLabel(row.Label)
+		key := "model:" + label
+		result.Buckets[key] = fmt.Sprintf("%.1f", used)
+		if strings.TrimSpace(row.ResetTime) != "" {
+			result.BucketResets[key] = strings.TrimSpace(row.ResetTime)
 		}
-		result.SourceDetail = strings.Join(details, ";")
+		debugParts = append(debugParts, fmt.Sprintf("%s %s remaining=%.1f reset=%s", label, row.Window, row.Remaining, row.ResetTime))
+	}
+	result.Used = fmt.Sprintf("%.1f", maxUsed)
+	if len(result.BucketResets) == 0 {
+		result.BucketResets = nil
+	}
+	if osDebugEnabled() {
+		result.SourceDetail = strings.Join(debugParts, ";")
 	}
 	return result, true
 }
 
-func readAntigravityOAuthCredentials() (antigravityOAuthCredentials, bool) {
-	if creds, ok := readAntigravityOAuthCredentialsFile(); ok {
-		return creds, true
-	}
-	return readAntigravityKeychainCredentials()
-}
-
-func readAntigravityOAuthCredentialsFile() (antigravityOAuthCredentials, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return antigravityOAuthCredentials{}, false
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".gemini", "oauth_creds.json"))
-	if err != nil {
-		return antigravityOAuthCredentials{}, false
-	}
-	var creds antigravityOAuthCredentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return antigravityOAuthCredentials{}, false
-	}
-	if creds.ExpiryDate > 0 && creds.ExpiryDate < time.Now().Add(-time.Minute).UnixMilli() {
-		return antigravityOAuthCredentials{}, false
-	}
-	creds.AuthSource = "oauth_creds.json"
-	return creds, strings.TrimSpace(creds.AccessToken) != ""
-}
-
-func readAntigravityKeychainCredentials() (antigravityOAuthCredentials, bool) {
-	if !antigravityKeychainAvailable() {
-		return antigravityOAuthCredentials{}, false
-	}
-	raw, err := antigravitySecurityOutput("find-generic-password", "-s", "gemini", "-a", "antigravity", "-w")
-	if err != nil {
-		return antigravityOAuthCredentials{}, false
-	}
-	secret := strings.TrimSpace(string(raw))
-	if strings.HasPrefix(secret, "go-keyring-base64:") {
-		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, "go-keyring-base64:"))
-		if err != nil {
-			return antigravityOAuthCredentials{}, false
-		}
-		secret = string(decoded)
-	}
-
-	var payload struct {
-		Token struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-			Expiry       string `json:"expiry"`
-		} `json:"token"`
-	}
-	if err := json.Unmarshal([]byte(secret), &payload); err != nil {
-		return antigravityOAuthCredentials{}, false
-	}
-	if payload.Token.Expiry != "" {
-		expiry, err := time.Parse(time.RFC3339Nano, payload.Token.Expiry)
-		if err != nil || expiry.Before(time.Now().Add(-time.Minute)) {
-			return antigravityOAuthCredentials{}, false
+func parseAntigravityCLIUsage(output string) []antigravityCLIUsageRow {
+	rows := []antigravityCLIUsageRow{}
+	for _, line := range strings.Split(output, "\n") {
+		row, ok := parseAntigravityCLIUsageLine(line)
+		if ok {
+			rows = append(rows, row)
 		}
 	}
-	creds := antigravityOAuthCredentials{
-		AccessToken:  strings.TrimSpace(payload.Token.AccessToken),
-		RefreshToken: strings.TrimSpace(payload.Token.RefreshToken),
-		AuthSource:   "keychain:gemini/antigravity",
-	}
-	return creds, creds.AccessToken != ""
+	return rows
 }
 
-func loadAntigravityProjectID(accessToken string) (string, error) {
-	body := []byte(`{"metadata":{"ideType":"GEMINI_CLI","pluginType":"GEMINI"}}`)
-	req, err := http.NewRequest("POST", antigravityProjectEndpoint(), bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := netclient.DefaultClient.DoWithRetry(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("load project failed: HTTP %d", resp.StatusCode)
+func parseAntigravityCLIUsageLine(line string) (antigravityCLIUsageRow, bool) {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) < 4 {
+		return antigravityCLIUsageRow{}, false
 	}
 
-	raw, _ := io.ReadAll(resp.Body)
-	var payload struct {
-		CloudAICompanionProject string `json:"cloudaicompanionProject"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(payload.CloudAICompanionProject), nil
-}
-
-func retrieveAntigravityQuota(accessToken string, projectID string) ([]antigravityQuotaBucket, error) {
-	payload, _ := json.Marshal(map[string]string{"project": projectID})
-	req, err := http.NewRequest("POST", antigravityQuotaEndpoint(), bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := netclient.DefaultClient.DoWithRetry(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("quota fetch failed: HTTP %d", resp.StatusCode)
-	}
-
-	raw, _ := io.ReadAll(resp.Body)
-	var wrapped antigravityQuotaResponse
-	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Buckets) > 0 {
-		return filterAntigravityQuotaBuckets(wrapped.Buckets), nil
-	}
-	var direct []antigravityQuotaBucket
-	if err := json.Unmarshal(raw, &direct); err != nil {
-		return nil, err
-	}
-	return filterAntigravityQuotaBuckets(direct), nil
-}
-
-func filterAntigravityQuotaBuckets(buckets []antigravityQuotaBucket) []antigravityQuotaBucket {
-	filtered := make([]antigravityQuotaBucket, 0, len(buckets))
-	for _, bucket := range buckets {
-		if strings.TrimSpace(bucket.ModelID) == "" {
-			continue
+	limitIdx := -1
+	for i := 0; i < len(fields)-3; i++ {
+		if strings.EqualFold(fields[i], "Limit") && strings.EqualFold(fields[i+1], "Remaining") && strings.HasSuffix(fields[i+2], "%") {
+			limitIdx = i
+			break
 		}
-		if bucket.RemainingFraction < 0 || bucket.RemainingFraction > 1 {
-			continue
-		}
-		filtered = append(filtered, bucket)
 	}
-	return filtered
+	if limitIdx <= 0 {
+		return antigravityCLIUsageRow{}, false
+	}
+
+	labelEnd := limitIdx
+	window := ""
+	if looksLikeAntigravityUsageWindow(fields[limitIdx-1]) {
+		window = fields[limitIdx-1]
+		labelEnd = limitIdx - 1
+	}
+	if labelEnd <= 0 {
+		return antigravityCLIUsageRow{}, false
+	}
+
+	remaining, err := strconv.ParseFloat(strings.TrimSuffix(fields[limitIdx+2], "%"), 64)
+	if err != nil || remaining < 0 || remaining > 100 {
+		return antigravityCLIUsageRow{}, false
+	}
+
+	return antigravityCLIUsageRow{
+		Label:     strings.Join(fields[:labelEnd], " "),
+		Window:    window,
+		Remaining: remaining,
+		ResetTime: fields[limitIdx+3],
+	}, true
 }
 
-func dedupeAntigravityQuotaBuckets(buckets []antigravityQuotaBucket) []antigravityQuotaBucket {
-	result := make([]antigravityQuotaBucket, 0, len(buckets))
-	seen := map[string]int{}
-	for _, bucket := range buckets {
-		key := fmt.Sprintf("%.4f|%s", bucket.RemainingFraction, bucket.ResetTime)
-		if idx, ok := seen[key]; ok {
-			if len(antigravityBucketName(bucket.ModelID)) < len(antigravityBucketName(result[idx].ModelID)) {
-				result[idx] = bucket
-			}
-			continue
-		}
-		seen[key] = len(result)
-		result = append(result, bucket)
+func looksLikeAntigravityUsageWindow(value string) bool {
+	s := strings.ToLower(strings.TrimSpace(value))
+	if s == "daily" || s == "weekly" || s == "monthly" || s == "hourly" {
+		return true
 	}
-	return result
+	return strings.HasSuffix(s, "h") || strings.HasSuffix(s, "d") || strings.HasSuffix(s, "w") || strings.HasSuffix(s, "m")
 }
 
-func antigravityUsedPercent(remainingFraction float64) float64 {
-	used := (1 - remainingFraction) * 100
+func antigravityCLIUsageBucketLabel(label string) string {
+	lower := strings.ToLower(strings.TrimSpace(label))
+	switch {
+	case strings.Contains(lower, "claude") && strings.Contains(lower, "gpt"):
+		return "Claude/GPT"
+	case strings.Contains(lower, "gemini") || strings.Contains(lower, "google"):
+		return "Gemini"
+	default:
+		return strings.TrimSpace(label)
+	}
+}
+
+func percentUsedFromRemaining(remaining float64) float64 {
+	used := 100 - remaining
 	if used < 0 {
 		return 0
 	}
@@ -284,47 +171,6 @@ func antigravityUsedPercent(remainingFraction float64) float64 {
 	return used
 }
 
-func antigravityProjectEndpoint() string {
-	if endpoint := strings.TrimSpace(os.Getenv("OCT_GEMINI_API_ENDPOINT")); endpoint != "" {
-		return endpoint
-	}
-	return "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-}
-
-func antigravityQuotaEndpoint() string {
-	if endpoint := strings.TrimSpace(os.Getenv("OCT_GEMINI_USAGE_ENDPOINT")); endpoint != "" {
-		return endpoint
-	}
-	return "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
-}
-
-func antigravityBucketName(modelID string) string {
-	switch strings.ToLower(strings.TrimSpace(modelID)) {
-	case "gemini-3.1-pro":
-		return "3.1 Pro"
-	case "gemini-3.1-flash":
-		return "3.1 Flash"
-	case "gemini-3.1-flash-lite":
-		return "3.1 Flash Lite"
-	case "gemini-3.0-pro":
-		return "3.0 Pro"
-	case "gemini-3.0-flash":
-		return "3.0 Flash"
-	case "gemini-2.5-pro":
-		return "Pro"
-	case "gemini-2.5-flash":
-		return "Flash"
-	case "gemini-2.5-flash-lite":
-		return "Flash Lite"
-	default:
-		trimmed := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(modelID)), "gemini-")
-		parts := strings.Split(trimmed, "-")
-		for i, part := range parts {
-			if part == "" {
-				continue
-			}
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
-		}
-		return strings.Join(parts, " ")
-	}
+func osDebugEnabled() bool {
+	return strings.TrimSpace(os.Getenv("OCT_USAGE_DEBUG")) == "1"
 }

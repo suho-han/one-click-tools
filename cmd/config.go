@@ -328,7 +328,7 @@ func setupTokens(tools []string) {
 			fmt.Println("✓ Command Code: Remote billing API (run 'commandcode login' or set COMMAND_CODE_API_KEY)")
 		case "agy":
 			needsGeminiAuth = true
-			fmt.Println("✓ Antigravity CLI: Local session-first usage detection")
+			fmt.Println("✓ Antigravity CLI: Quota parsed from 'agy --print /usage'")
 		case "opencode":
 			fmt.Println("✓ OpenCode: Local session logs (~/.opencode/sessions or ~/.config/opencode/sessions)")
 		case "codex":

@@ -1,113 +1,79 @@
 package usage
 
 import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestFetchAntigravityUsageUsesQuotaAPI(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	credsDir := tmp + "/.gemini"
-	if err := os.MkdirAll(credsDir, 0o755); err != nil {
-		t.Fatalf("mkdir creds failed: %v", err)
-	}
-	creds := fmt.Sprintf(`{"access_token":"test-token","refresh_token":"refresh","expiry_date":%d}`, time.Now().Add(time.Hour).UnixMilli())
-	if err := os.WriteFile(credsDir+"/oauth_creds.json", []byte(creds), 0o600); err != nil {
-		t.Fatalf("write creds failed: %v", err)
-	}
-
-	projectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("project Authorization header did not contain test bearer token")
+func withMockAntigravityUsageCommand(t *testing.T, output string, err error) {
+	t.Helper()
+	old := antigravityUsageCommandOutput
+	t.Cleanup(func() { antigravityUsageCommandOutput = old })
+	antigravityUsageCommandOutput = func(timeout time.Duration, name string, args ...string) (string, error) {
+		if timeout != 20*time.Second {
+			t.Fatalf("timeout = %v, want 20s", timeout)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"cloudaicompanionProject":"project-1"}`)
-	}))
-	defer projectServer.Close()
-	quotaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("quota Authorization header did not contain test bearer token")
+		if name != "agy" {
+			t.Fatalf("command = %q, want agy", name)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"buckets":[{"remainingFraction":0.6,"resetTime":"2026-07-22T00:00:00Z","modelId":"gemini-2.5-pro"}]}`)
-	}))
-	defer quotaServer.Close()
-	t.Setenv("OCT_GEMINI_API_ENDPOINT", projectServer.URL)
-	t.Setenv("OCT_GEMINI_USAGE_ENDPOINT", quotaServer.URL)
-
-	result := FetchAntigravityUsage()
-	if result.Source != "quota" {
-		t.Fatalf("expected quota source, got %q", result.Source)
-	}
-	if result.Used != "40.0" {
-		t.Fatalf("expected 40.0 used percent, got %q", result.Used)
-	}
-	if result.Buckets["model:Pro"] != "40.0" {
-		t.Fatalf("expected Pro model bucket 40.0, got %q", result.Buckets["model:Pro"])
+		if len(args) != 2 || args[0] != "--print" || args[1] != "/usage" {
+			t.Fatalf("args = %v, want [--print /usage]", args)
+		}
+		return output, err
 	}
 }
 
-func TestReadAntigravityOAuthCredentialsUsesKeychainBase64(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	oldAvailable := antigravityKeychainAvailable
-	oldOutput := antigravitySecurityOutput
-	t.Cleanup(func() {
-		antigravityKeychainAvailable = oldAvailable
-		antigravitySecurityOutput = oldOutput
-	})
-	antigravityKeychainAvailable = func() bool { return true }
-	antigravitySecurityOutput = func(args ...string) ([]byte, error) {
-		want := []string{"find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"}
-		if len(args) != len(want) {
-			t.Fatalf("security args = %v, want %v", args, want)
-		}
-		for i := range want {
-			if args[i] != want[i] {
-				t.Fatalf("security args = %v, want %v", args, want)
-			}
-		}
-		payload := fmt.Sprintf(
-			`{"token":{"access_token":"keychain-token","refresh_token":"refresh","expiry":%q},"auth_method":"consumer"}`,
-			time.Now().Add(time.Hour).Format(time.RFC3339Nano),
-		)
-		return []byte("go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(payload))), nil
+func TestParseAntigravityCLIUsage(t *testing.T) {
+	rows := parseAntigravityCLIUsage("Gemini Models\tWeekly Limit Remaining\t100%\t2026-09-10T17:41:25Z\nClaude and GPT models\tWeekly Limit Remaining\t87.5%\t2026-09-10T17:41:25Z\n")
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
 	}
-
-	creds, ok := readAntigravityOAuthCredentials()
-	if !ok {
-		t.Fatal("expected keychain credentials")
+	if rows[0].Label != "Gemini Models" || rows[0].Window != "Weekly" || rows[0].Remaining != 100 || rows[0].ResetTime != "2026-09-10T17:41:25Z" {
+		t.Fatalf("unexpected first row: %#v", rows[0])
 	}
-	if creds.AccessToken != "keychain-token" {
-		t.Fatalf("access token = %q, want keychain-token", creds.AccessToken)
-	}
-	if creds.AuthSource != "keychain:gemini/antigravity" {
-		t.Fatalf("auth source = %q, want keychain key", creds.AuthSource)
+	if rows[1].Label != "Claude and GPT models" || rows[1].Remaining != 87.5 {
+		t.Fatalf("unexpected second row: %#v", rows[1])
 	}
 }
 
-func TestFetchAntigravityUsageDoesNotUseLocalSessionFallback(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+func TestFetchAntigravityUsageUsesAgyPrintUsage(t *testing.T) {
+	withMockAntigravityUsageCommand(t, "Gemini Models\tWeekly Limit Remaining\t100%\t2026-09-10T17:41:25Z\nClaude and GPT models\tWeekly Limit Remaining\t87.5%\t2026-09-10T17:41:25Z\n", nil)
 
 	result := FetchAntigravityUsage()
 	if result.Provider != "antigravity" {
 		t.Fatalf("expected provider antigravity, got %q", result.Provider)
 	}
+	if result.Status != "ok" {
+		t.Fatalf("expected ok status, got %q", result.Status)
+	}
+	if result.Source != "agy-cli" {
+		t.Fatalf("expected agy-cli source, got %q", result.Source)
+	}
+	if result.Used != "12.5" {
+		t.Fatalf("expected max used percent 12.5, got %q", result.Used)
+	}
+	if result.Buckets["model:Gemini"] != "0.0" {
+		t.Fatalf("expected Gemini used 0.0, got %q", result.Buckets["model:Gemini"])
+	}
+	if result.Buckets["model:Claude/GPT"] != "12.5" {
+		t.Fatalf("expected Claude/GPT used 12.5, got %q", result.Buckets["model:Claude/GPT"])
+	}
+	if result.BucketResets["model:Claude/GPT"] != "2026-09-10T17:41:25Z" {
+		t.Fatalf("expected reset time, got %q", result.BucketResets["model:Claude/GPT"])
+	}
+}
+
+func TestFetchAntigravityUsageNoCLIUsage(t *testing.T) {
+	withMockAntigravityUsageCommand(t, "", errors.New("agy failed"))
+
+	result := FetchAntigravityUsage()
 	if result.Status != "warn" {
 		t.Fatalf("expected warn status, got %q", result.Status)
+	}
+	if result.Used != "n/a" {
+		t.Fatalf("expected n/a usage, got %q", result.Used)
 	}
 	if result.Unit != "percent" {
 		t.Fatalf("expected percent unit, got %q", result.Unit)
@@ -118,15 +84,13 @@ func TestFetchAntigravityUsageDoesNotUseLocalSessionFallback(t *testing.T) {
 }
 
 func TestFetchGeminiUsageDelegatesToAntigravity(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	withMockAntigravityUsageCommand(t, "Gemini Models\tWeekly Limit Remaining\t99%\t2026-09-10T17:41:25Z\n", nil)
 
 	result := FetchGeminiUsage()
 	if result.Provider != "antigravity" {
 		t.Fatalf("expected provider antigravity, got %q", result.Provider)
 	}
-	if !strings.EqualFold(result.Source, "quota") {
-		t.Fatalf("expected quota source, got %q", result.Source)
+	if !strings.EqualFold(result.Source, "agy-cli") {
+		t.Fatalf("expected agy-cli source, got %q", result.Source)
 	}
 }

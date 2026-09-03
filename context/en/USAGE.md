@@ -47,6 +47,7 @@ Notes:
 - `--compact` prints remaining percent in one line, for example `C-88% X-45% G-72%` (`Claude=C`, `Codex=X`, `Gemini/Antigravity=G`).
 - Alert logic applies when `--notify` is set or `usage_alert_enabled=true`.
 - Selected providers are filtered by `enabled_tools`, and output order follows `agent_order`.
+- Antigravity parses quota from `agy --print /usage` without reading tokens or keychain data directly.
 - Command Code reads 5h/7d/monthly buckets from the billing API using `COMMAND_CODE_API_KEY` or `~/.commandcode/auth.json`.
 - Legacy config values `gemini` and `gemini-cli` are still accepted, but they normalize internally to `agy`.
 
@@ -56,9 +57,6 @@ Notes:
   - `OCT_CODEX_USAGE_ENDPOINT`
   - `OCT_CLAUDE_USAGE_ENDPOINT`
   - `OCT_COPILOT_USAGE_ENDPOINT`
-- Antigravity compatibility testing overrides (legacy alias only):
-  - `OCT_GEMINI_USAGE_ENDPOINT`
-  - `OCT_GEMINI_API_ENDPOINT`
 - Cursor:
   - `OCT_CURSOR_USAGE_URL` (custom remote endpoint)
   - `CURSOR_API_KEY` (Bearer token used with `OCT_CURSOR_USAGE_URL`)

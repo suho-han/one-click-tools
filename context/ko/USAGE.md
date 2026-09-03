@@ -47,6 +47,7 @@ oct usage --notify
 - `--compact`는 잔여 percent를 한 줄로 출력합니다. 예: `C-88% X-45% G-72%` (`Claude=C`, `Codex=X`, `Gemini/Antigravity=G`).
 - `--notify` 또는 `usage_alert_enabled=true`일 때 알림 규칙이 적용됩니다.
 - 조회 대상 provider는 `enabled_tools` 기준이며, 출력 순서는 `agent_order`를 따릅니다.
+- Antigravity는 token/keychain을 직접 읽지 않고 `agy --print /usage` 출력에서 quota를 파싱합니다.
 - Command Code는 `COMMAND_CODE_API_KEY` 또는 `~/.commandcode/auth.json`의 로그인 정보를 사용해 billing API에서 5h/7d/monthly bucket을 조회합니다.
 - legacy config 값 `gemini`, `gemini-cli`는 계속 허용되지만 내부적으로 `agy`로 normalize 됩니다.
 
@@ -56,9 +57,6 @@ oct usage --notify
   - `OCT_CODEX_USAGE_ENDPOINT`
   - `OCT_CLAUDE_USAGE_ENDPOINT`
   - `OCT_COPILOT_USAGE_ENDPOINT`
-- Antigravity compatibility testing override (legacy alias only):
-  - `OCT_GEMINI_USAGE_ENDPOINT`
-  - `OCT_GEMINI_API_ENDPOINT`
 - Cursor:
   - `OCT_CURSOR_USAGE_URL` (커스텀 원격 endpoint)
   - `CURSOR_API_KEY` (`OCT_CURSOR_USAGE_URL` 호출 시 Bearer)
