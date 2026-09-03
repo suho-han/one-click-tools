@@ -11,6 +11,15 @@ func TestNormalizeToolNameAntigravityAliases(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolNameCommandCodeAliases(t *testing.T) {
+	cases := []string{"commandcode", "command-code", "cmd", "cmdc"}
+	for _, in := range cases {
+		if got := NormalizeToolName(in); got != "commandcode" {
+			t.Fatalf("NormalizeToolName(%q) = %q, want commandcode", in, got)
+		}
+	}
+}
+
 func TestAntigravityToolDoesNotMatchAgAlias(t *testing.T) {
 	for _, tool := range Tools {
 		if tool.BinaryName != "agy" {

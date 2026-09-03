@@ -277,12 +277,13 @@ func TestRenderCompactRemainingUsesProviderInitialsAndRemainingPercent(t *testin
 	var buf bytes.Buffer
 	RenderCompactRemaining(&buf, []UsageResult{
 		{Provider: "claude-code", Unit: "percent", Used: "55.0", Buckets: map[string]string{"5h": "55.0"}},
+		{Provider: "commandcode", Unit: "percent", Used: "25.0", Buckets: map[string]string{"5h": "25.0"}},
 		{Provider: "codex", Unit: "percent", Used: "80.0", Buckets: map[string]string{"5h": "80.0", "7d": "75.0"}},
 		{Provider: "antigravity", Unit: "percent", Used: "12.4", Buckets: map[string]string{"model:gemini-2.5-pro": "12.4"}},
 		{Provider: "opencode", Status: "warn", Used: "n/a", Unit: "percent"},
 	})
 
-	if got, want := strings.TrimSpace(buf.String()), "C-45% X-25% G-88% O-?"; got != want {
+	if got, want := strings.TrimSpace(buf.String()), "C-45% D-75% X-25% G-88% O-?"; got != want {
 		t.Fatalf("RenderCompactRemaining output = %q, want %q", got, want)
 	}
 }

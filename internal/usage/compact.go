@@ -37,6 +37,8 @@ func compactProviderLabel(provider string) string {
 	switch {
 	case strings.Contains(p, "claude"):
 		return "C"
+	case strings.Contains(p, "commandcode"), strings.Contains(p, "command code"):
+		return "D"
 	case strings.Contains(p, "codex"), strings.Contains(p, "openai"):
 		return "X"
 	case strings.Contains(p, "antigravity"), strings.Contains(p, "gemini"), p == "agy":

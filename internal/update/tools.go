@@ -78,6 +78,15 @@ var Tools = []Tool{
 		HexColor:      "#D97757",
 	},
 	{
+		Name:          "Command Code",
+		Package:       "command-code",
+		BinaryName:    "commandcode",
+		BinaryAliases: []string{"command-code", "cmd", "cmdc"},
+		Icon:          "⌘",
+		LobeIcon:      "CommandCode",
+		HexColor:      "#60A5FA",
+	},
+	{
 		Name:          "Cursor CLI",
 		Package:       "cursor-agent",
 		BinaryName:    "cursor-agent",
@@ -132,6 +141,8 @@ func NormalizeToolName(name string) string {
 		return ""
 	case "claude-code":
 		return "claude"
+	case "command-code", "cmd", "cmdc":
+		return "commandcode"
 	case "cursor", "agent":
 		return "cursor-agent"
 	case "antigravity", "gemini", "gemini-cli":

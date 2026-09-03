@@ -324,6 +324,8 @@ func setupTokens(tools []string) {
 		case "claude":
 			needsClaudeAuth = true
 			fmt.Println("✓ Claude Code: Local authentication (OAuth)")
+		case "commandcode":
+			fmt.Println("✓ Command Code: Remote billing API (run 'commandcode login' or set COMMAND_CODE_API_KEY)")
 		case "agy":
 			needsGeminiAuth = true
 			fmt.Println("✓ Antigravity CLI: Local session-first usage detection")

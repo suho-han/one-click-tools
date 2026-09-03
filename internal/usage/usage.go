@@ -55,7 +55,7 @@ type UsageResult struct {
 func SelectedTools() []update.Tool {
 	order := viper.GetStringSlice("agent_order")
 	if len(order) == 0 {
-		order = []string{"agy", "claude", "cursor-agent", "copilot", "opencode", "codex"}
+		order = []string{"agy", "claude", "commandcode", "cursor-agent", "copilot", "opencode", "codex"}
 	}
 	enabledTools := viper.GetStringSlice("enabled_tools")
 	orderedTools := update.GetOrderedTools(order)
@@ -70,6 +70,7 @@ func GetUsage() ([]UsageResult, error) {
 		"antigravity":  FetchAntigravityUsage,
 		"gemini":       FetchAntigravityUsage,
 		"claude":       FetchClaudeUsage,
+		"commandcode":  FetchCommandCodeUsage,
 		"cursor-agent": FetchCursorUsage,
 		"copilot":      FetchCopilotUsage,
 		"opencode":     FetchOpenCodeUsage,
@@ -130,6 +131,8 @@ func colorizeProvider(label string, provider string) string {
 		code = "94"
 	case strings.Contains(p, "claude"):
 		code = "93"
+	case strings.Contains(p, "commandcode"), strings.Contains(p, "command code"):
+		code = "94"
 	case strings.Contains(p, "codex"), strings.Contains(p, "openai"):
 		code = "96"
 	case strings.Contains(p, "copilot"), strings.Contains(p, "github"):
@@ -181,6 +184,8 @@ func providerDisplayLabel(provider string) string {
 		return "▣ " + provider
 	case strings.Contains(p, "opencode"):
 		return "🧩 " + provider
+	case strings.Contains(p, "commandcode"), strings.Contains(p, "command code"):
+		return "⌘ " + provider
 	default:
 		return provider
 	}

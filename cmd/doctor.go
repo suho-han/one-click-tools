@@ -37,7 +37,7 @@ var doctorShellCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonMode, _ := cmd.Flags().GetBool("json")
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		report := collectShellDoctorReport([]string{"oct", "gh", "brew", "claude", "codex", "copilot", "cursor-agent", "opencode", "agy"})
+		report := collectShellDoctorReport([]string{"oct", "gh", "brew", "claude", "commandcode", "codex", "copilot", "cursor-agent", "opencode", "agy"})
 		if jsonMode {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")

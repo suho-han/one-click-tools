@@ -17,6 +17,7 @@ Updates all supported agents.
 
 Supported agents:
 - Claude Code (`@anthropic-ai/claude-code`)
+- Command Code (`command-code`, binary: `commandcode` / `cmd`)
 - OpenAI Codex (`@openai/codex`)
 - Antigravity CLI (official installer, binary: `agy`)
 - GitHub Copilot (`@github/copilot`)
@@ -46,6 +47,7 @@ Notes:
 - `--compact` prints remaining percent in one line, for example `C-88% X-45% G-72%` (`Claude=C`, `Codex=X`, `Gemini/Antigravity=G`).
 - Alert logic applies when `--notify` is set or `usage_alert_enabled=true`.
 - Selected providers are filtered by `enabled_tools`, and output order follows `agent_order`.
+- Command Code reads 5h/7d/monthly buckets from the billing API using `COMMAND_CODE_API_KEY` or `~/.commandcode/auth.json`.
 - Legacy config values `gemini` and `gemini-cli` are still accepted, but they normalize internally to `agy`.
 
 ### Key environment variables

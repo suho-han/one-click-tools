@@ -127,6 +127,7 @@ oct alert config set timezone Asia/Seoul
 ## 🛠 Supported Agents
 
 - **Claude Code** (`@anthropic-ai/claude-code`)
+- **Command Code** (`command-code`, binary: `commandcode` / `cmd`)
 - **OpenAI Codex** (`@openai/codex`)
 - **Antigravity CLI** (official installer, binary: `agy`)
 - **GitHub Copilot** (`@github/copilot`)
@@ -138,7 +139,7 @@ oct alert config set timezone Asia/Seoul
 | Manager | Detection strategy | Install path | Built-in use |
 | --- | --- | --- | --- |
 | `brew` | binary under `brew --prefix` / `brew list` | `brew upgrade <formula>` | Claude, Cursor, OpenCode, Codex when Homebrew-owned |
-| `npm` | `npm prefix -g` / `npm list -g` | `npm install -g <package>` | default fallback for Claude, OpenCode, Codex, Copilot |
+| `npm` | `npm prefix -g` / `npm list -g` | `npm install -g <package>` | default fallback for Claude, Command Code, OpenCode, Codex, Copilot |
 | `pnpm` | `pnpm bin -g` / `pnpm list -g` | `pnpm add -g <package>` | provenance-based detection only |
 | `yarn` | `yarn global bin` / `yarn global list` | `yarn global add <package>` | provenance-based detection only |
 | `cargo` | `cargo:` package prefix / cargo bin path | `cargo install <crate> --locked` | explicit package override |

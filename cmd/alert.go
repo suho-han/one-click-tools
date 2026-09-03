@@ -351,7 +351,7 @@ func parseAlertClockMinute(val string) (int, bool) {
 }
 
 func providerOptions() []string {
-	base := []string{"antigravity", "codex", "claude-code", "copilot", "cursor", "opencode"}
+	base := []string{"antigravity", "codex", "claude-code", "commandcode", "copilot", "cursor", "opencode"}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(base)+4)
 	for _, p := range base {
@@ -367,6 +367,8 @@ func providerOptions() []string {
 			p = "cursor"
 		case "claude":
 			p = "claude-code"
+		case "commandcode":
+			p = "commandcode"
 		}
 		if p == "" || seen[p] {
 			continue

@@ -186,6 +186,8 @@ func colorizeMonitorProvider(provider string) string {
 		code = "94"
 	case strings.Contains(p, "claude"):
 		code = "93"
+	case strings.Contains(p, "commandcode"), strings.Contains(p, "command code"):
+		code = "94"
 	case strings.Contains(p, "codex"), strings.Contains(p, "openai"):
 		code = "96"
 	case strings.Contains(p, "copilot"), strings.Contains(p, "github"):
@@ -238,6 +240,8 @@ func monitorProviderDisplayLabel(provider string) string {
 		return "▣ " + provider
 	case strings.Contains(p, "opencode"):
 		return "🧩 " + provider
+	case strings.Contains(p, "commandcode"), strings.Contains(p, "command code"):
+		return "⌘ " + provider
 	default:
 		return provider
 	}

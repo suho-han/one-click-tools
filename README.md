@@ -4,6 +4,7 @@
 
 ## Supported AI Agents
 - **Claude Code** (`@anthropic-ai/claude-code`)
+- **Command Code** (`command-code`, binary: `commandcode` / `cmd`)
 - **OpenAI Codex** (`@openai/codex`)
 - **Antigravity CLI** (official installer, binary: `agy`)
 - **GitHub Copilot** (`@github/copilot`)
@@ -75,7 +76,7 @@ oct menubar install-helper
 | Manager | 감지 기준 | 설치 경로 | built-in 사용처 |
 | --- | --- | --- | --- |
 | `brew` | `brew --prefix` 하위 binary 또는 `brew list` | `brew upgrade <formula>` | Homebrew로 설치된 Claude/Cursor/OpenCode/Codex |
-| `npm` | `npm prefix -g` 또는 `npm list -g` | `npm install -g <package>` | Claude/OpenCode/Codex/Copilot 기본 fallback |
+| `npm` | `npm prefix -g` 또는 `npm list -g` | `npm install -g <package>` | Claude/Command Code/OpenCode/Codex/Copilot 기본 fallback |
 | `pnpm` | `pnpm bin -g` 또는 `pnpm list -g` | `pnpm add -g <package>` | provenance 기반 감지만 지원 |
 | `yarn` | `yarn global bin` 또는 `yarn global list` | `yarn global add <package>` | provenance 기반 감지만 지원 |
 | `cargo` | `cargo:` package prefix 또는 cargo bin path | `cargo install <crate> --locked` | explicit package override |

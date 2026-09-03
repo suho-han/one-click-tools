@@ -17,6 +17,7 @@ oct update --beta
 
 지원 대상:
 - Claude Code (`@anthropic-ai/claude-code`)
+- Command Code (`command-code`, binary: `commandcode` / `cmd`)
 - OpenAI Codex (`@openai/codex`)
 - Antigravity CLI (official installer, binary: `agy`)
 - GitHub Copilot (`@github/copilot`)
@@ -46,6 +47,7 @@ oct usage --notify
 - `--compact`는 잔여 percent를 한 줄로 출력합니다. 예: `C-88% X-45% G-72%` (`Claude=C`, `Codex=X`, `Gemini/Antigravity=G`).
 - `--notify` 또는 `usage_alert_enabled=true`일 때 알림 규칙이 적용됩니다.
 - 조회 대상 provider는 `enabled_tools` 기준이며, 출력 순서는 `agent_order`를 따릅니다.
+- Command Code는 `COMMAND_CODE_API_KEY` 또는 `~/.commandcode/auth.json`의 로그인 정보를 사용해 billing API에서 5h/7d/monthly bucket을 조회합니다.
 - legacy config 값 `gemini`, `gemini-cli`는 계속 허용되지만 내부적으로 `agy`로 normalize 됩니다.
 
 ### 주요 환경 변수

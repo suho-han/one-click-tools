@@ -460,6 +460,7 @@ func TestBuiltInToolManagerSupportMatrix(t *testing.T) {
 
 	wantByBinary := map[string]Manager{
 		"claude":       Npm,
+		"commandcode":  Npm,
 		"cursor-agent": CursorAgent,
 		"opencode":     Npm,
 		"codex":        Npm,
