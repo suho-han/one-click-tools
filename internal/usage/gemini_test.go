@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,47 @@ func TestFetchAntigravityUsageUsesQuotaAPI(t *testing.T) {
 	}
 	if result.Buckets["model:Pro"] != "40.0" {
 		t.Fatalf("expected Pro model bucket 40.0, got %q", result.Buckets["model:Pro"])
+	}
+}
+
+func TestReadAntigravityOAuthCredentialsUsesKeychainBase64(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	oldAvailable := antigravityKeychainAvailable
+	oldOutput := antigravitySecurityOutput
+	t.Cleanup(func() {
+		antigravityKeychainAvailable = oldAvailable
+		antigravitySecurityOutput = oldOutput
+	})
+	antigravityKeychainAvailable = func() bool { return true }
+	antigravitySecurityOutput = func(args ...string) ([]byte, error) {
+		want := []string{"find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"}
+		if len(args) != len(want) {
+			t.Fatalf("security args = %v, want %v", args, want)
+		}
+		for i := range want {
+			if args[i] != want[i] {
+				t.Fatalf("security args = %v, want %v", args, want)
+			}
+		}
+		payload := fmt.Sprintf(
+			`{"token":{"access_token":"keychain-token","refresh_token":"refresh","expiry":%q},"auth_method":"consumer"}`,
+			time.Now().Add(time.Hour).Format(time.RFC3339Nano),
+		)
+		return []byte("go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(payload))), nil
+	}
+
+	creds, ok := readAntigravityOAuthCredentials()
+	if !ok {
+		t.Fatal("expected keychain credentials")
+	}
+	if creds.AccessToken != "keychain-token" {
+		t.Fatalf("access token = %q, want keychain-token", creds.AccessToken)
+	}
+	if creds.AuthSource != "keychain:gemini/antigravity" {
+		t.Fatalf("auth source = %q, want keychain key", creds.AuthSource)
 	}
 }
 

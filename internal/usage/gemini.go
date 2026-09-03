@@ -2,12 +2,15 @@ package usage
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -45,7 +48,15 @@ type antigravityOAuthCredentials struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiryDate   int64  `json:"expiry_date"`
+	AuthSource   string `json:"-"`
 }
+
+var (
+	antigravityKeychainAvailable = func() bool { return runtime.GOOS == "darwin" }
+	antigravitySecurityOutput    = func(args ...string) ([]byte, error) {
+		return exec.Command("security", args...).Output()
+	}
+)
 
 type antigravityQuotaBucket struct {
 	RemainingFraction float64 `json:"remainingFraction"`
@@ -96,12 +107,23 @@ func fetchAntigravityQuotaUsage(base UsageResult) (UsageResult, bool) {
 	result.Used = fmt.Sprintf("%.1f", maxUsed)
 	result.Message = "Usage fetched from Google Code Assist quota API"
 	if os.Getenv("OCT_USAGE_DEBUG") == "1" {
-		result.SourceDetail = strings.Join(modelParts, ";")
+		details := modelParts
+		if creds.AuthSource != "" {
+			details = append([]string{"auth_source=" + creds.AuthSource}, details...)
+		}
+		result.SourceDetail = strings.Join(details, ";")
 	}
 	return result, true
 }
 
 func readAntigravityOAuthCredentials() (antigravityOAuthCredentials, bool) {
+	if creds, ok := readAntigravityOAuthCredentialsFile(); ok {
+		return creds, true
+	}
+	return readAntigravityKeychainCredentials()
+}
+
+func readAntigravityOAuthCredentialsFile() (antigravityOAuthCredentials, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return antigravityOAuthCredentials{}, false
@@ -117,7 +139,49 @@ func readAntigravityOAuthCredentials() (antigravityOAuthCredentials, bool) {
 	if creds.ExpiryDate > 0 && creds.ExpiryDate < time.Now().Add(-time.Minute).UnixMilli() {
 		return antigravityOAuthCredentials{}, false
 	}
+	creds.AuthSource = "oauth_creds.json"
 	return creds, strings.TrimSpace(creds.AccessToken) != ""
+}
+
+func readAntigravityKeychainCredentials() (antigravityOAuthCredentials, bool) {
+	if !antigravityKeychainAvailable() {
+		return antigravityOAuthCredentials{}, false
+	}
+	raw, err := antigravitySecurityOutput("find-generic-password", "-s", "gemini", "-a", "antigravity", "-w")
+	if err != nil {
+		return antigravityOAuthCredentials{}, false
+	}
+	secret := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(secret, "go-keyring-base64:") {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, "go-keyring-base64:"))
+		if err != nil {
+			return antigravityOAuthCredentials{}, false
+		}
+		secret = string(decoded)
+	}
+
+	var payload struct {
+		Token struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			Expiry       string `json:"expiry"`
+		} `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(secret), &payload); err != nil {
+		return antigravityOAuthCredentials{}, false
+	}
+	if payload.Token.Expiry != "" {
+		expiry, err := time.Parse(time.RFC3339Nano, payload.Token.Expiry)
+		if err != nil || expiry.Before(time.Now().Add(-time.Minute)) {
+			return antigravityOAuthCredentials{}, false
+		}
+	}
+	creds := antigravityOAuthCredentials{
+		AccessToken:  strings.TrimSpace(payload.Token.AccessToken),
+		RefreshToken: strings.TrimSpace(payload.Token.RefreshToken),
+		AuthSource:   "keychain:gemini/antigravity",
+	}
+	return creds, creds.AccessToken != ""
 }
 
 func loadAntigravityProjectID(accessToken string) (string, error) {
