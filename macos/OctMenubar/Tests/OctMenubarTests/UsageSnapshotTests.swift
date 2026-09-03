@@ -97,8 +97,8 @@ final class UsageSnapshotTests: XCTestCase {
         let json = #"""
         {
           "summary": {
-            "total": 2,
-            "ok": 2,
+            "total": 3,
+            "ok": 3,
             "warn": 0,
             "error": 0
           },
@@ -120,6 +120,17 @@ final class UsageSnapshotTests: XCTestCase {
               "buckets": {
                 "7d": "75.0"
               }
+            },
+            {
+              "provider": "commandcode",
+              "status": "ok",
+              "used": "73.3",
+              "unit": "percent",
+              "buckets": {
+                "5h": "73.3",
+                "7d": "31.3",
+                "1m": "15.6"
+              }
             }
           ]
         }
@@ -128,9 +139,10 @@ final class UsageSnapshotTests: XCTestCase {
         let response = try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8))
         let snapshot = UsageSnapshot.from(response: response, refreshDate: .now, refreshInterval: 60, titleMode: .compact, usageDisplayMode: .remaining)
 
-        XCTAssertEqual(snapshot.statusItemTitle, "C-45% X-25%")
+        XCTAssertEqual(snapshot.statusItemTitle, "C-45% X-25% D-27%")
         XCTAssertTrue(snapshot.statusItemAccessibilityLabel.contains("claude-code 5h 45.0% left"))
         XCTAssertTrue(snapshot.statusItemAccessibilityLabel.contains("codex 7d 25.0% left"))
+        XCTAssertTrue(snapshot.statusItemAccessibilityLabel.contains("commandcode 5h 26.7% left"))
 
         // The same numbers, read from the same metrics, must appear in the
         // popover card strip below the title -- this is the regression guard
@@ -138,6 +150,10 @@ final class UsageSnapshotTests: XCTestCase {
         // while the card body always showed the raw "used" value beneath it.
         XCTAssertEqual(snapshot.providers[0].metrics, [.init(label: "5h", value: "45.0% left")])
         XCTAssertEqual(snapshot.providers[1].metrics, [.init(label: "7d", value: "25.0% left")])
+        XCTAssertEqual(
+            snapshot.providers[2].metrics,
+            [.init(label: "5h", value: "26.7% left"), .init(label: "7d", value: "68.7% left"), .init(label: "1m", value: "84.4% left")]
+        )
     }
 
     func testUsageSnapshotCompactStatusItemTitleHonorsUsedMode() throws {
@@ -383,6 +399,11 @@ final class UsageSnapshotTests: XCTestCase {
               "enabled": true
             },
             {
+              "name": "Command Code",
+              "binary_name": "commandcode",
+              "enabled": true
+            },
+            {
               "name": "Claude Code",
               "binary_name": "claude",
               "enabled": false
@@ -399,8 +420,8 @@ final class UsageSnapshotTests: XCTestCase {
         XCTAssertTrue(snapshot.sessionRefreshEnabled)
         XCTAssertEqual(snapshot.sessionRefreshInterval, "weekly")
         XCTAssertEqual(snapshot.sessionRefreshHour, 9)
-        XCTAssertEqual(snapshot.tools.map(\.binaryName), ["codex", "claude"])
-        XCTAssertEqual(snapshot.tools.map(\.enabled), [true, false])
+        XCTAssertEqual(snapshot.tools.map(\.binaryName), ["codex", "commandcode", "claude"])
+        XCTAssertEqual(snapshot.tools.map(\.enabled), [true, true, false])
     }
 
     func testConfigurationSnapshotDecodesLegacyConfigListJSON() throws {
@@ -439,12 +460,14 @@ final class UsageSnapshotTests: XCTestCase {
             sessionRefreshHour: 9,
             tools: [
                 ConfigTool(name: "OpenAI Codex", binaryName: "codex", enabled: true),
+                ConfigTool(name: "Command Code", binaryName: "commandcode", enabled: false),
                 ConfigTool(name: "Claude Code", binaryName: "claude", enabled: false),
             ]
         )
         var draft = ConfigurationDraft(snapshot: snapshot)
 
         draft.setTool("claude", enabled: true)
+        draft.setTool("commandcode", enabled: true)
         draft.usageDisplayMode = .used
         draft.sessionRefreshEnabled = true
         draft.sessionRefreshInterval = "weekly"
@@ -453,13 +476,13 @@ final class UsageSnapshotTests: XCTestCase {
 
         let payload = draft.updatePayload()
 
-        XCTAssertEqual(payload.enabledTools, ["claude", "codex"])
+        XCTAssertEqual(payload.enabledTools, ["codex", "claude", "commandcode"])
         XCTAssertEqual(payload.usageDisplayMode, .used)
         XCTAssertEqual(payload.menubarTitleMode, .oct)
         XCTAssertTrue(payload.sessionRefreshEnabled)
         XCTAssertEqual(payload.sessionRefreshInterval, "weekly")
         XCTAssertEqual(payload.sessionRefreshHour, 22)
-        XCTAssertEqual(payload.agentOrder, ["claude", "codex"])
+        XCTAssertEqual(payload.agentOrder, ["codex", "claude", "commandcode"])
     }
 
     func testConfigurationDraftRevertsToLoadedSnapshot() {

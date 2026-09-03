@@ -23,6 +23,7 @@ struct UsageSnapshot: Equatable {
         providers: [
             ProviderCard(name: "codex", status: .loading, metrics: [], message: "Waiting for first refresh"),
             ProviderCard(name: "claude-code", status: .loading, metrics: [], message: "Refresh timer starts after launch"),
+            ProviderCard(name: "commandcode", status: .loading, metrics: [], message: "Billing API usage loads after refresh"),
         ],
         note: "Data will be loaded from oct usage --json after launch."
     )
@@ -67,6 +68,9 @@ struct ProviderCard: Equatable, Identifiable {
         let provider = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if provider.contains("claude") {
             return "C"
+        }
+        if provider.contains("commandcode") || provider.contains("command code") {
+            return "D"
         }
         if provider.contains("codex") || provider.contains("openai") {
             return "X"
@@ -120,6 +124,8 @@ struct ProviderCard: Equatable, Identifiable {
         switch name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "claude-code":
             return Color(red: 0.93, green: 0.56, blue: 0.31)
+        case "commandcode":
+            return Color(red: 0.38, green: 0.65, blue: 0.98)
         case "codex":
             return Color(red: 0.36, green: 0.71, blue: 0.98)
         case "antigravity":
